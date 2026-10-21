@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightTalk Beacon — laptop transmitter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #111; color: #eee;
+         min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  #setup { max-width: 560px; padding: 32px; background: #1c1c1e; border-radius: 16px; }
+  #setup h1 { font-size: 22px; margin-bottom: 8px; }
+  #setup p { color: #aaa; font-size: 14px; line-height: 1.5; margin: 10px 0; }
+  #setup label { font-size: 13px; color: #aaa; display: block; margin: 14px 0 6px; }
+  #msg { width: 100%; font-size: 20px; padding: 10px 12px; border-radius: 10px;
+         border: 1px solid #444; background: #000; color: #fff; font-family: monospace; }
+  #start { margin-top: 18px; width: 100%; padding: 14px; font-size: 17px; font-weight: 700;
+           border: none; border-radius: 12px; background: #0a84ff; color: #fff; cursor: pointer; }
+  #start:hover { background: #409cff; }
+  .warn { background: #3a2a00; border: 1px solid #8a6d00; border-radius: 10px;
+          padding: 10px 12px; font-size: 13px; color: #ffd60a; margin-top: 14px; }
+  .tip { font-size: 13px; color: #aaa; }
+  kbd { background: #333; padding: 2px 6px; border-radius: 6px; font-size: 12px; }
+
+  #stage { position: fixed; inset: 0; background: #000; display: none;
+           align-items: center; justify-content: center; flex-direction: column; }
+  #flash { width: 62vmin; height: 62vmin; background: #000; border-radius: 8px; }
+  #hud { position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 16px;
+         background: rgba(20,20,22,.92); display: flex; align-items: center; gap: 16px;
+         font-size: 13px; color: #aaa; }
+  #hud .mono { font-family: monospace; color: #fff; }
+  #stop { margin-left: auto; padding: 8px 18px; border-radius: 10px; border: none;
+          background: #ff453a; color: #fff; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>💡 LightTalk Beacon</h1>
+  <p>This laptop becomes the transmitter. The square will flash your message as
+     light using the LightTalk v1 protocol — point the iPhone's Decode tab at it
+     and tap the square on the phone screen.</p>
+  <label for="msg">MESSAGE (A–Z, 0–9, space and : - . / ? only)</label>
+  <input id="msg" maxlength="40" value="WTR 1400" spellcheck="false">
+  <p class="tip" id="airtime"></p>
+  <button id="start">Start beacon</button>
+  <div class="warn">⚠️ <b>Before starting:</b> screen brightness to <b>maximum</b>;
+    turn <b>off</b> Night Shift, True Tone and auto-brightness; make the browser
+    <b>fullscreen</b> (<kbd>F11</kbd> on Windows, green button on Mac); keep this
+    tab focused. Note: the square flashes ~2.5×/sec — look away if sensitive to
+    flashing light.</div>
+  <p class="tip">No network, no pairing — just light. Same bits the Arduino sends.</p>
+</div>
+
+<div id="stage">
+  <div id="flash"></div>
+  <div id="hud">
+    <span id="status" class="mono">starting…</span>
+    <button id="stop">Stop (Esc)</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* Must match BlinkProtocol.swift / Transmitter.ino exactly. */
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :-./?";
+const BIT_MS = 200, GAP_MS = 2000;
+const PREAMBLE = [1,0,1,0,1,0,1,0];
+const START = [1,1,1,0,0,0];
+const END = [1,1,1,1,1,1]; // all-ones: no letter code looks like this
+
+function encodeChar(ch) {
+  const code = ALPHABET.indexOf(ch);
+  if (code < 0) return null;
+  const bits = [];
+  let ones = 0;
+  for (let s = 5; s >= 0; s--) { const b = (code >> s) & 1; ones += b; bits.push(b); }
+  bits.push(ones % 2 === 0 ? 0 : 1); // even parity
+  return bits;
+}
+function bitStream(msg) {
+  let bits = PREAMBLE.concat(START);
+  for (const raw of msg.toUpperCase()) {
+    const b = encodeChar(raw);
+    if (b) bits = bits.concat(b);
+  }
+  return bits.concat(END);
+}
+
+const msgInput = document.getElementById('msg');
+const airtimeEl = document.getElementById('airtime');
+function refreshAirtime() {
+  const n = bitStream(msgInput.value).length;
+  airtimeEl.textContent = "≈ " + Math.round(n * BIT_MS / 1000) + " s per loop + 2 s gap.";
+}
+msgInput.addEventListener('input', refreshAirtime);
+refreshAirtime();
+
+const setupEl = document.getElementById('setup');
+const stageEl = document.getElementById('stage');
+const flashEl = document.getElementById('flash');
+const statusEl = document.getElementById('status');
+let bits = [], idx = 0, timer = null, running = false;
+
+function tick() {
+  if (!running) return;
+  if (idx >= bits.length) {
+    flashEl.style.background = '#000';
+    statusEl.textContent = "gap… next loop soon";
+    timer = setTimeout(() => { idx = 0; tick(); }, GAP_MS);
+    return;
+  }
+  const b = bits[idx];
+  flashEl.style.background = b ? '#ffffff' : '#000000';
+  statusEl.textContent = "bit " + (idx + 1) + "/" + bits.length + (b ? " ●" : " ○");
+  idx++;
+  timer = setTimeout(tick, BIT_MS);
+}
+function start() {
+  bits = bitStream(msgInput.value);
+  if (bits.length <= PREAMBLE.length + START.length + END.length) {
+    alert("Type a message first (letters, digits, space, : - . / ?).");
+    return;
+  }
+  running = true; idx = 0;
+  setupEl.style.display = 'none';
+  stageEl.style.display = 'flex';
+  if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+  tick();
+}
+function stop() {
+  running = false;
+  clearTimeout(timer);
+  flashEl.style.background = '#000';
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  stageEl.style.display = 'none';
+  setupEl.style.display = 'block';
+}
+document.getElementById('start').addEventListener('click', start);
+document.getElementById('stop').addEventListener('click', stop);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && running) stop(); });
+</script>
+</body>
+</html>

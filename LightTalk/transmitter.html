@@ -24,7 +24,7 @@
 
   #stage { position: fixed; inset: 0; background: #000; display: none;
            align-items: center; justify-content: center; flex-direction: column; }
-  #flash { width: 62vmin; height: 62vmin; background: #000; border-radius: 8px; }
+  #flash { width: 50vmin; height: 50vmin; background: #000; border-radius: 8px; }
   #hud { position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 16px;
          background: rgba(20,20,22,.92); display: flex; align-items: center; gap: 16px;
          font-size: 13px; color: #aaa; }
@@ -36,9 +36,9 @@
 <body>
 
 <div id="setup">
-  <h1>💡 LightTalk Beacon</h1>
+  <h1> LightTalk Test Beacon</h1>
   <p>This laptop becomes the transmitter. The square will flash your message as
-     light using the LightTalk v1 protocol — point the iPhone's Decode tab at it
+     light using the LightTalk v1 protocol. Point the iPhone's Decode tab at it
      and tap the square on the phone screen.</p>
   <label for="msg">MESSAGE (A–Z, 0–9, space and : - . / ? only)</label>
   <input id="msg" maxlength="40" value="WTR 1400" spellcheck="false">
@@ -49,7 +49,7 @@
     <b>fullscreen</b> (<kbd>F11</kbd> on Windows, green button on Mac); keep this
     tab focused. Note: the square flashes ~2.5×/sec — look away if sensitive to
     flashing light.</div>
-  <p class="tip">No network, no pairing — just light. Same bits the Arduino sends.</p>
+  <p class="tip">No network or pairing needed for communication. Just ligh! Same bits sent as an Arduino or ESP32.</p>
 </div>
 
 <div id="stage">

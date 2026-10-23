@@ -68,9 +68,10 @@ enum BeaconPresets {
         localizedExpansion(for: raw, language: "en")
     }
 
-    /// Built-in translations of the camp codes, so the language picker works
-    /// on EVERY phone — no AI model needed. (Device codes stay English; the AI
-    /// layer translates those when it's available.)
+    /// Built-in translations of every preset code (camp + device), so the
+    /// language picker works on EVERY phone — no AI model needed. Free text
+    /// (not a known code) is the only thing that needs the AI layer to
+    /// translate; codes always translate deterministically.
     private static let translations: [String: [String: String]] = [
         "WTR 1400": [
             "es": "El camión de agua llega a las 2:00 PM. Traigan recipientes.",
@@ -113,6 +114,34 @@ enum BeaconPresets {
             "hi": "सब ठीक है। शिविर की सामान्य गतिविधि फिर से शुरू कर सकते हैं।",
             "ta": "அனைத்தும் சரி. முகாமின் வழக்கமான செயல்பாடுகளைத் தொடரலாம்.",
             "ar": "كل شيء واضح. يمكن استئناف النشاط الطبيعي للمخيم.",
+        ],
+        "T23 OK": [
+            "es": "El sensor de temperatura marca 23°C — dentro del rango normal.",
+            "fr": "Le capteur de température indique 23°C — dans la plage normale.",
+            "hi": "तापमान सेंसर 23°C दिखा रहा है — सामान्य सीमा के भीतर है।",
+            "ta": "வெப்பநிலை சென்சார் 23°C காட்டுகிறது — சாதாரண வரம்பிற்குள் உள்ளது.",
+            "ar": "مستشعر الحرارة يسجل 23 درجة مئوية — ضمن النطاق الطبيعي.",
+        ],
+        "FNFLT": [
+            "es": "Fallo detectado en el ventilador de refrigeración. Revisen la unidad del ventilador.",
+            "fr": "Panne du ventilateur de refroidissement détectée. Vérifiez le ventilateur.",
+            "hi": "कूलिंग फैन में खराबी मिली है। फैन यूनिट की जांच करें।",
+            "ta": "குளிரூட்டும் விசிறியில் கோளாறு கண்டறியப்பட்டது. விசிறி அலகைச் சரிபார்க்கவும்.",
+            "ar": "تم اكتشاف عطل في مروحة التبريد. افحصوا وحدة المروحة.",
+        ],
+        "BATLO": [
+            "es": "Batería de respaldo baja. Cárguenla o reemplácenla pronto.",
+            "fr": "Batterie de secours faible. Chargez-la ou remplacez-la bientôt.",
+            "hi": "बैकअप बैटरी कम है। जल्द चार्ज करें या बदलें।",
+            "ta": "காப்பு பேட்டரி குறைவாக உள்ளது. விரைவில் சார்ஜ் செய்யவும் அல்லது மாற்றவும்.",
+            "ar": "بطارية الاحتياط منخفضة. اشحنوها أو استبدلوها قريباً.",
+        ],
+        "PMP OK": [
+            "es": "La bomba funciona con normalidad.",
+            "fr": "La pompe fonctionne normalement.",
+            "hi": "पंप सामान्य रूप से चल रहा है।",
+            "ta": "பம்ப் சாதாரணமாக இயங்குகிறது.",
+            "ar": "المضخة تعمل بشكل طبيعي.",
         ],
     ]
 

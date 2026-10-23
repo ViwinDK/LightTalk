@@ -16,22 +16,29 @@ struct BlinkDecoderView: View {
     @State private var flashVisible = false
     @State private var shareText: String = ""
     @State private var showingShare = false
+    /// The newest message the user dismissed with the ✕ on its card.
+    /// The card stays hidden until a NEW message (different id) arrives.
+    @State private var dismissedMessageID: UUID? = nil
     @AppStorage("lighttalk.targetLanguage") private var targetLanguage = "system"
 
     private struct LanguageOption {
         let code: String
-        let label: String
+        let label: String    // short label for the toolbar button
+        let fullName: String // full name for the dropdown rows
     }
     private var languageOptions: [LanguageOption] {
         [
-            LanguageOption(code: "system", label: "System"),
-            LanguageOption(code: "en", label: "EN"),
-            LanguageOption(code: "es", label: "ES"),
-            LanguageOption(code: "fr", label: "FR"),
-            LanguageOption(code: "hi", label: "HI"),
-            LanguageOption(code: "ta", label: "TA"),
-            LanguageOption(code: "ar", label: "AR"),
+            LanguageOption(code: "system", label: "Auto", fullName: "System (device language)"),
+            LanguageOption(code: "en", label: "EN", fullName: "English"),
+            LanguageOption(code: "es", label: "ES", fullName: "Español"),
+            LanguageOption(code: "fr", label: "FR", fullName: "Français"),
+            LanguageOption(code: "hi", label: "HI", fullName: "हिन्दी (Hindi)"),
+            LanguageOption(code: "ta", label: "TA", fullName: "தமிழ் (Tamil)"),
+            LanguageOption(code: "ar", label: "AR", fullName: "العربية (Arabic)"),
         ]
+    }
+    private var currentLanguageLabel: String {
+        languageOptions.first(where: { $0.code == targetLanguage })?.label ?? "Auto"
     }
 
     var body: some View {
@@ -60,6 +67,25 @@ struct BlinkDecoderView: View {
             .navigationTitle("LightTalk")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Language dropdown, top-left: what language the 💡 line speaks.
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        ForEach(languageOptions, id: \.code) { opt in
+                            Button {
+                                targetLanguage = opt.code
+                            } label: {
+                                if targetLanguage == opt.code {
+                                    Label(opt.fullName, systemImage: "checkmark")
+                                } else {
+                                    Text(opt.fullName)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(currentLanguageLabel, systemImage: "globe")
+                            .font(.subheadline).bold()
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("How it works") { showGuide = true }
                 }
@@ -90,6 +116,11 @@ struct BlinkDecoderView: View {
                     flashVisible = false
                 }
             }
+            .onChange(of: targetLanguage) {
+                // Language picked in the toolbar dropdown: re-run the meaning
+                // pass on existing messages in the new language.
+                decoder.retranslateAll()
+            }
             // (AI enhancement now happens inside the decoder at message
             // completion — the entry carries its own 💡 line. No view race.)
         }
@@ -119,27 +150,8 @@ struct BlinkDecoderView: View {
                     .tint(decoder.signalMeter > 0.6 ? .green : .yellow)
                 engineBadge
             }
-            // AI language chips: what language the 💡 line speaks.
-            // (Chips instead of a menu picker — always tappable, always visible.)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    Text("AI language").font(.caption2).foregroundColor(.white.opacity(0.7))
-                    ForEach(languageOptions, id: \.code) { opt in
-                        Button(opt.label) {
-                            targetLanguage = opt.code
-                        }
-                        .font(.caption2).bold()
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(targetLanguage == opt.code ? Color.blue : Color.white.opacity(0.15))
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                    }
-                }
-            }
-            .onChange(of: targetLanguage) {
-                // Re-run the enhancement on existing messages in the new language.
-                decoder.retranslateAll()
-            }
+            // (The language picker lives in the toolbar now — a dropdown at
+            // top-left — so it no longer takes a row of the control panel.)
             // Tiny field-diagnosis readout: what the decoder is hearing.
             if !decoder.debugInfo.isEmpty {
                 Text(decoder.debugInfo)
@@ -149,7 +161,7 @@ struct BlinkDecoderView: View {
             
             // Completed messages: most recent expanded, older ones compact.
             // (Saves screen space — the camera preview is the star.)
-            if !decoder.messages.isEmpty {
+            if let newestEntry = decoder.messages.first, newestEntry.id != dismissedMessageID {
                 VStack(alignment: .leading, spacing: 4) {                    ForEach(Array(decoder.messages.prefix(3).enumerated()), id: \.element.id) { idx, entry in
                     if idx == 0 {
                         // Newest: full display with tappable characters.
@@ -193,6 +205,16 @@ struct BlinkDecoderView: View {
                                 Image(systemName: "square.and.arrow.up")
                                     .foregroundColor(.blue)
                             }
+                            Button {
+                                // ✕ hides the decoded-message card until the NEXT
+                                // message arrives. It does not delete anything —
+                                // the History tab keeps the full log.
+                                dismissedMessageID = entry.id
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.white.opacity(0.55))
+                            }
+                            .accessibilityLabel("Hide message")
                         }
                         if entry.uncertainCount > 0 {
                             Text("⚠️ \(entry.uncertainCount) character\(entry.uncertainCount == 1 ? "" : "s") failed parity — AI repair attempted.")
@@ -237,7 +259,10 @@ struct BlinkDecoderView: View {
                 .cornerRadius(10)
             }
             
-            HStack(spacing: 12) {
+            // Bottom bar, two rows: Start/Stop gets a row of its own at full
+            // width — sharing one row with the Simulate toggle was squeezing
+            // its label. Simulate + Re-aim share the second row.
+            VStack(spacing: 10) {
                 // Start is gated on auto-aim lock (or a manual tap): pressing
                 // Start before the app has found the blink just wastes a loop.
                 let aimReady = decoder.autoScore > 0.1 || decoder.hasManualTap
@@ -246,24 +271,28 @@ struct BlinkDecoderView: View {
                     else { decoder.startDecoding() }
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
                 .tint(isActive ? .red : .blue)
                 .disabled(!isActive && !aimReady)
-                
-                // Manual aim is active: offer one-tap return to auto-aim.
-                if decoder.hasManualTap && !isActive {
-                    Button("🎯 Re-aim") { decoder.hasManualTap = false }
-                        .font(.caption).bold()
-                        .foregroundColor(.yellow)
-                }
-                
-                Toggle("Simulate (no beacon needed)", isOn: $decoder.simulate)
-                    .toggleStyle(.switch)
-                    .foregroundColor(.white)
-                    .font(.caption)
-                    .fixedSize()
-                    .onChange(of: decoder.simulate) {
-                        if isActive { decoder.stopDecoding() }
+
+                HStack(spacing: 12) {
+                    Toggle("Simulate (no beacon needed)", isOn: $decoder.simulate)
+                        .toggleStyle(.switch)
+                        .foregroundColor(.white)
+                        .font(.caption)
+                        .fixedSize()
+                        .onChange(of: decoder.simulate) {
+                            if isActive { decoder.stopDecoding() }
+                        }
+                    Spacer()
+                    // Manual aim is active: offer one-tap return to auto-aim.
+                    if decoder.hasManualTap && !isActive {
+                        Button("🎯 Re-aim") { decoder.hasManualTap = false }
+                            .font(.caption).bold()
+                            .foregroundColor(.yellow)
                     }
+                }
             }
             .padding()
             .background(Color.black.opacity(0.72))

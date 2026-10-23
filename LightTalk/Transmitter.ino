@@ -16,7 +16,7 @@
  *   - Frame: PREAMBLE 10101010, START 111000, characters..., END 111111,
  *     then LED off for 2 s, then the loop repeats.
  *   (END is all-ones so no letter — e.g. H = 000111 — can be mistaken for it.)
- *   - Bit duration: 200 ms (5 bits/sec)
+ *   - Bit duration: 200 ms (5 bits/sec — 2x faster than v1, still reliable)
  */
 
 const int LED_PIN = 13;                 // 13 = built-in LED, or 8 = external LED
@@ -24,7 +24,7 @@ const unsigned long BIT_MS = 200;
 const unsigned long GAP_MS = 2000;
 
 // Change this to any message using the alphabet above (auto-uppercased).
-// Keep it short: every character costs ~0.7 s of airtime.
+// Keep it short: every character costs ~1.4 s of airtime.
 const char* MESSAGE = "WTR 1400";
 
 // Camp-coordination presets — uncomment the one you want the beacon to loop.

@@ -163,6 +163,40 @@ enum MessageIntelligence {
         completion(nil)
     }
 
+    /// Quick health check for the on-device model: pings it with a trivial
+    /// prompt. Used by the Guide's "AI status" row so the user can see
+    /// whether the ✨ features are actually live on this phone.
+    enum ModelHealth { case ready, notReady, unavailable }
+
+    static func checkModelHealth(completion: @escaping (ModelHealth) -> Void) {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *), FoundationModelAssist.isAvailable {
+            var done = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                if !done { done = true; completion(.notReady) }
+            }
+            Task {
+                do {
+                    let session = LanguageModelSession()
+                    let r = try await session.respond(to: "Reply with exactly: OK")
+                    let ok = r.content.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().contains("OK")
+                    if !done {
+                        done = true
+                        await MainActor.run { completion(ok ? .ready : .notReady) }
+                    }
+                } catch {
+                    if !done {
+                        done = true
+                        await MainActor.run { completion(.notReady) }
+                    }
+                }
+            }
+            return
+        }
+        #endif
+        completion(.unavailable)
+    }
+
     /// Resolve "system" to the device language code.
     static func resolveLanguage(_ language: String) -> String {
         if language == "system" {
@@ -248,40 +282,6 @@ enum FoundationModelAssist {
                 await MainActor.run { completion(deterministicFallback) }
             }
         }
-    }
-
-    /// Quick health check for the on-device model: pings it with a trivial
-    /// prompt. Used by the Guide's "AI status" row so the user can see
-    /// whether the ✨ features are actually live on this phone.
-    enum ModelHealth { case ready, notReady, unavailable }
-
-    static func checkModelHealth(completion: @escaping (ModelHealth) -> Void) {
-        #if canImport(FoundationModels)
-        if #available(iOS 26.0, *), FoundationModelAssist.isAvailable {
-            var done = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-                if !done { done = true; completion(.notReady) }
-            }
-            Task {
-                do {
-                    let session = LanguageModelSession()
-                    let r = try await session.respond(to: "Reply with exactly: OK")
-                    let ok = r.content.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().contains("OK")
-                    if !done {
-                        done = true
-                        await MainActor.run { completion(ok ? .ready : .notReady) }
-                    }
-                } catch {
-                    if !done {
-                        done = true
-                        await MainActor.run { completion(.notReady) }
-                    }
-                }
-            }
-            return
-        }
-        #endif
-        completion(.unavailable)
     }
 
     // MARK: - Natural language → beacon code ("speak plainly, flash precisely")

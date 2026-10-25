@@ -86,4 +86,20 @@ final class CustomCodeStore: ObservableObject {
     func delete(at offsets: IndexSet) {
         codes.remove(atOffsets: offsets)
     }
+
+    /// Edit an existing entry in place. If the code string itself changed,
+    /// the old entry is removed and the new one added (same as re-adding).
+    func update(oldCode: String, code: String, meaning: String) {
+        let c = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let m = meaning.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !c.isEmpty, !m.isEmpty else { return }
+        codes.removeAll { $0.code.uppercased() == oldCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+        codes.append(CustomCode(id: UUID(), code: c, meaning: m))
+    }
+
+    /// Delete a single entry by code string (used by the edit sheet).
+    func delete(code: String) {
+        let c = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        codes.removeAll { $0.code.uppercased() == c }
+    }
 }

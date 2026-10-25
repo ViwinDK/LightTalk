@@ -163,40 +163,6 @@ enum MessageIntelligence {
         completion(nil)
     }
 
-    /// Quick health check for the on-device model: pings it with a trivial
-    /// prompt. Used by the Guide's "AI status" row so the user can see
-    /// whether the ✨ features are actually live on this phone.
-    enum ModelHealth { case ready, notReady, unavailable }
-
-    static func checkModelHealth(completion: @escaping (ModelHealth) -> Void) {
-        #if canImport(FoundationModels)
-        if #available(iOS 26.0, *), FoundationModelAssist.isAvailable {
-            var done = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-                if !done { done = true; completion(.notReady) }
-            }
-            Task {
-                do {
-                    let session = LanguageModelSession()
-                    let r = try await session.respond(to: "Reply with exactly: OK")
-                    let ok = r.content.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().contains("OK")
-                    if !done {
-                        done = true
-                        await MainActor.run { completion(ok ? .ready : .notReady) }
-                    }
-                } catch {
-                    if !done {
-                        done = true
-                        await MainActor.run { completion(.notReady) }
-                    }
-                }
-            }
-            return
-        }
-        #endif
-        completion(.unavailable)
-    }
-
     /// Resolve "system" to the device language code.
     static func resolveLanguage(_ language: String) -> String {
         if language == "system" {
@@ -222,6 +188,20 @@ enum FoundationModelAssist {
         SystemLanguageModel.default.isAvailable
     }
 
+    /// Full language name for a code — the small on-device model follows
+    /// "Translate to Hindi" more reliably than "language code 'hi'".
+    static func languageName(for code: String) -> String {
+        switch code {
+        case "es": return "Spanish"
+        case "fr": return "French"
+        case "hi": return "Hindi"
+        case "ta": return "Tamil"
+        case "ar": return "Arabic"
+        case "en": return "English"
+        default: return code
+        }
+    }
+
     static func enhance(_ message: DecodedMessage,
                         language: String,
                         customCodes: [CustomCode],
@@ -229,28 +209,9 @@ enum FoundationModelAssist {
                         completion: @escaping (String) -> Void) {
         let uncertainList = message.uncertainIndices.sorted().map(String.init).joined(separator: ",")
         let lang = MessageIntelligence.resolveLanguage(language)
-        // The model gets the FULL codebook — built-in presets plus user codes —
-        // so it repairs and expands from knowledge, not imagination.
-        let presetBook = BeaconPresets.all
-            .map { "\"\($0.code)\" means \"\($0.detail)\"" }
-            .joined(separator: "; ")
-        let customBook = customCodes.map { "\"\($0.code)\" means \"\($0.meaning)\"" }.joined(separator: "; ")
-        var bookLine = "Known codes: \(presetBook)."
-        bookLine += " Pattern: \"WTR <HHMM>\" (e.g. \"WTR 1000\") means the water truck arrives at that time — same sentence as WTR 1400 with the time substituted."
-        if !customBook.isEmpty {
-            bookLine += " User-defined codes (use first): \(customBook)."
-        }
-        let prompt = """
-        You received text decoded from a blinking LED beacon. \(bookLine)
-        Decoded text: "\(message.rawText)"
-        The characters at these 0-based positions failed their parity check and may be wrong: [\(uncertainList)].
-        Task: 1) LITERAL codebook check: does the decoded text match a known code character-for-character, treating ONLY the flagged positions as wildcards? If yes, use that code's meaning. If no, the text is NOT a known code — do NOT substitute any other known code's meaning. NEVER turn "BEDS 34" into "SHL B" or any similar semantic guess. 2) Repair: you may change ONLY the flagged positions, one character each, smallest change first. NEVER change unflagged characters. 3) Translate the final result to language code "\(lang)" if not already in that language.
-        Rules: NEVER invent new facts, numbers, or times. NEVER output the meaning of a code other than the one literally decoded. If the text matches no known code, translate it literally into "\(lang)". Reply with ONLY the final text, no explanation, no quotes.
-        """
-        MessageIntelligence.debugLog("model prompt lang='\(lang)' text='\(message.rawText)'")
-        // Guard against semantic substitution: if the raw text does NOT
-        // literally match a known code (flagged positions as wildcards),
-        // the model may not answer with a DIFFERENT code's meaning verbatim.
+        // Does the raw text literally match a known code (flagged positions
+        // as wildcards)? Needed both for the prompt choice and for the
+        // semantic-substitution guard below.
         let cleanedRaw = message.rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         func wildcardMatch(_ code: String) -> Bool {
             guard code.count == cleanedRaw.count else { return false }
@@ -262,6 +223,39 @@ enum FoundationModelAssist {
         }
         let rawMatchesKnown = BeaconPresets.all.contains { wildcardMatch($0.code) }
             || customCodes.contains { wildcardMatch($0.code) }
+        // Prompt choice: pure free text with nothing to repair gets a SHORT
+        // single-task prompt. The full codebook prompt made the small
+        // on-device model echo the input unchanged ("HELLO" -> "HELLO",
+        // "MED 5" -> "MED 5") — its "NEVER change unflagged characters"
+        // repair rule bled into the translation step. The long prompt is
+        // only needed when there is something to repair or expand.
+        let prompt: String
+        if !rawMatchesKnown && message.uncertainIndices.isEmpty {
+            prompt = """
+            Translate the following text to \(languageName(for: lang)). Reply with only the translated text, no explanation, no quotes.
+            Text: "\(message.rawText)"
+            """
+        } else {
+            // The model gets the FULL codebook — built-in presets plus user codes —
+            // so it repairs and expands from knowledge, not imagination.
+            let presetBook = BeaconPresets.all
+                .map { "\"\($0.code)\" means \"\($0.detail)\"" }
+                .joined(separator: "; ")
+            let customBook = customCodes.map { "\"\($0.code)\" means \"\($0.meaning)\"" }.joined(separator: "; ")
+            var bookLine = "Known codes: \(presetBook)."
+            bookLine += " Pattern: \"WTR <HHMM>\" (e.g. \"WTR 1000\") means the water truck arrives at that time — same sentence as WTR 1400 with the time substituted."
+            if !customBook.isEmpty {
+                bookLine += " User-defined codes (use first): \(customBook)."
+            }
+            prompt = """
+            You received text decoded from a blinking LED beacon. \(bookLine)
+            Decoded text: "\(message.rawText)"
+            The characters at these 0-based positions failed their parity check and may be wrong: [\(uncertainList)].
+            Task: 1) LITERAL codebook check: does the decoded text match a known code character-for-character, treating ONLY the flagged positions as wildcards? If yes, use that code's meaning. If no, the text is NOT a known code — do NOT substitute any other known code's meaning. NEVER turn "BEDS 34" into "SHL B" or any similar semantic guess. 2) Repair: you may change ONLY the flagged positions, one character each, smallest change first. NEVER change unflagged characters. 3) Translate the final result to language code "\(lang)" if not already in that language.
+            Rules: NEVER invent new facts, numbers, or times. NEVER output the meaning of a code other than the one literally decoded. If the text matches no known code, translate it literally into "\(lang)". Reply with ONLY the final text, no explanation, no quotes.
+            """
+        }
+        MessageIntelligence.debugLog("model prompt lang='\(lang)' text='\(message.rawText)'")
         Task {
             do {
                 let session = LanguageModelSession()

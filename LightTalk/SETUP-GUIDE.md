@@ -38,7 +38,7 @@ Two independent tracks. Do the Arduino track first (15 minutes, no Xcode needed)
      LED to pin 8: LED long leg → 220 Ω resistor → pin 8; LED short leg → GND.
      Then set `LED_PIN = 8`.
 8. Click **Upload** (the → arrow button). Wait for "Done uploading."
-9. Verify: the LED starts looping. You'll see ~3 seconds of fast blinking
+9. Verify: the LED starts looping. You'll see ~1.6 seconds of fast blinking
    (the preamble), then the message, then a 2-second dark pause, then repeat.
    Open **Tools → Serial Monitor** (set to 9600 baud) to see the message echoed
    as confirmation.
@@ -49,7 +49,7 @@ Two independent tracks. Do the Arduino track first (15 minutes, no Xcode needed)
 | No port in Tools → Port | Try another USB cable (must be data-capable); try another USB port; install CH340 driver for clone boards |
 | Upload fails | Re-check Board + Port; close Serial Monitor and Serial Plotter, then retry |
 | "Done uploading" but LED dark | Check `LED_PIN` matches your wiring; for external LED, check resistor is in series and legs aren't swapped |
-| LED blinks but looks random | That's the message — it's supposed to look like that. Time one loop: `WATER 14:00` takes ~38 s |
+| LED blinks but looks random | That's the message — it's supposed to look like that. Time one loop: `WATER 14:00` blinks for ~19 s, then a 2 s gap |
 
 ---
 
@@ -58,14 +58,15 @@ Two independent tracks. Do the Arduino track first (15 minutes, no Xcode needed)
 ### What you need
 - Mac (the same one is fine)
 - iPhone — **a real iPhone, not the Simulator** (the Simulator has no camera).
-  Any iPhone with iOS 16+ works.
+  Any iPhone running iOS 26.2 or later works.
 - Apple ID (free — no paid developer account needed)
 - USB cable (or same Wi-Fi network for wireless debugging)
 
-### Step 1 — Install Xcode 16.x (one-time, ~30 min)
+### Step 1 — Install Xcode 26 (one-time, ~30 min)
 1. Go to `developer.apple.com/download/more/` and sign in with the Apple ID.
-2. Download the newest **Xcode 16.x** (NOT the App Store version — that one
-   requires macOS 26.6, which this Mac doesn't have).
+2. Download **Xcode 26.2** (the iOS 26.2 SDK) from the same downloads page.
+   Older Xcode versions cannot build this project: the deployment target is
+   iOS 26.2, and the on-device AI features need the iOS 26 SDK.
 3. Double-click the `.xip` to expand it (needs ~30 GB free), drag Xcode into
    Applications, and launch it once. Agree to the license; let it finish
    installing components.
@@ -76,11 +77,13 @@ Two independent tracks. Do the Arduino track first (15 minutes, no Xcode needed)
    (Testing System / Storage: None.) Save it anywhere.
 3. In the file list, select the generated `ContentView.swift` → Delete →
    **Move to Trash**. (The app's real entry point is `LightTalkApp.swift`.)
-4. **File → Add Files to "LightTalk"…** → select these 7 files from the
+4. **File → Add Files to "LightTalk"…** → select these 12 files from the
    LightTalk folder:
    - `LightTalkApp.swift`, `BlinkDecoder.swift`, `BlinkDecoderView.swift`,
      `BlinkProtocol.swift`, `MessageIntelligence.swift`,
-     `BeaconPresets.swift`, `BeaconTransmitView.swift`
+     `BeaconPresets.swift`, `BeaconTransmitView.swift`, `HistoryView.swift`,
+     `LearnView.swift`, `CustomCodeStore.swift`, `Models.swift`,
+     `BitInspectorView.swift`
    - Check **"Copy items if needed"** and make sure the **LightTalk target**
      is checked → Add.
 
@@ -94,6 +97,8 @@ Two independent tracks. Do the Arduino track first (15 minutes, no Xcode needed)
    - **Privacy - Speech Recognition Usage Description** → `LightTalk transcribes your dictated beacon messages on-device.`
    (If a key is missing from the list, add it as a User-Defined Setting under
    Build Settings instead: `INFOPLIST_KEY_NSLocationWhenInUseUsageDescription`, etc.)
+   Note: the microphone and speech keys are currently unused — dictation UI is
+   disabled in this build (type instead). Camera and location are the keys that matter.
 
 ### Step 4 — Signing (free Apple ID)
 1. Same target → **Signing & Capabilities** tab.
@@ -120,7 +125,7 @@ Two independent tracks. Do the Arduino track first (15 minutes, no Xcode needed)
    reticle marks the spot it's watching).
 3. Tap **Start decoding**. You'll see "Calibrating to this light…" (the
    preamble — this is the daylight trick), then letters arriving live.
-4. `WATER 14:00` takes ~35 seconds to arrive. Watch the signal meter:
+4. `WATER 14:00` takes ~19 seconds to arrive. Watch the signal meter:
    it should swing high/low with the blinks.
 
 **With two phones (no Arduino):**

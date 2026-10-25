@@ -19,6 +19,7 @@ struct BlinkDecoderView: View {
     /// The newest message the user dismissed with the ✕ on its card.
     /// The card stays hidden until a NEW message (different id) arrives.
     @State private var dismissedMessageID: UUID? = nil
+    @State private var showingLanguages = false
     @AppStorage("lighttalk.targetLanguage") private var targetLanguage = "system"
 
     private struct LanguageOption {
@@ -67,25 +68,6 @@ struct BlinkDecoderView: View {
             .navigationTitle("LightTalk")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // Language dropdown, top-left: what language the 💡 line speaks.
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        ForEach(languageOptions, id: \.code) { opt in
-                            Button {
-                                targetLanguage = opt.code
-                            } label: {
-                                if targetLanguage == opt.code {
-                                    Label(opt.fullName, systemImage: "checkmark")
-                                } else {
-                                    Text(opt.fullName)
-                                }
-                            }
-                        }
-                    } label: {
-                        Label(currentLanguageLabel, systemImage: "globe")
-                            .font(.subheadline).bold()
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("How it works") { showGuide = true }
                 }
@@ -150,8 +132,53 @@ struct BlinkDecoderView: View {
                     .tint(decoder.signalMeter > 0.6 ? .green : .yellow)
                 engineBadge
             }
-            // (The language picker lives in the toolbar now — a dropdown at
-            // top-left — so it no longer takes a row of the control panel.)
+            // Language picker: plain buttons, NOT a Menu — the Menu opened
+            // but its rows never fired (menu stayed open, checkmark never
+            // moved), so the picker is an expandable row of plain buttons,
+            // the same mechanism the rest of this screen uses.
+            Button {
+                showingLanguages.toggle()
+            } label: {
+                HStack {
+                    Label(currentLanguageLabel, systemImage: "globe")
+                    Text("Language")
+                    Spacer()
+                    Image(systemName: showingLanguages ? "chevron.up" : "chevron.down")
+                }
+                .font(.callout).bold()
+                .foregroundColor(.white)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity)
+                .background(Color.white.opacity(0.12))
+                .cornerRadius(10)
+                .contentShape(Rectangle())
+            }
+            if showingLanguages {
+                VStack(spacing: 2) {
+                    ForEach(languageOptions, id: \.code) { opt in
+                        Button {
+                            targetLanguage = opt.code
+                            showingLanguages = false
+                        } label: {
+                            HStack {
+                                Text(opt.fullName)
+                                Spacer()
+                                if targetLanguage == opt.code {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                            .foregroundColor(.white)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity)
+                            .background(targetLanguage == opt.code ? Color.white.opacity(0.12) : Color.clear)
+                            .cornerRadius(8)
+                            .contentShape(Rectangle())
+                        }
+                    }
+                }
+            }
             // Tiny field-diagnosis readout: what the decoder is hearing.
             if !decoder.debugInfo.isEmpty {
                 Text(decoder.debugInfo)

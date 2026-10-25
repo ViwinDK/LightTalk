@@ -5,10 +5,18 @@ import Speech
 import CoreLocation
 
 /// One-shot location fetch for the SOS beacon.
+///
+/// The original version called requestWhenInUseAuthorization() and
+/// requestLocation() in the same breath, so the request fired before the
+/// permission was granted and failed. This version waits for the
+/// authorization callback, asks for a hundred-metre fix (fast indoors,
+/// plenty for an SOS beacon), and retries once on a transient error
+/// instead of failing on the first one.
 final class SOSLocator: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     @Published var statusText = ""
     var onLocation: ((String) -> Void)?
+    private var retried = false
 
     override init() {
         super.init()
@@ -17,8 +25,35 @@ final class SOSLocator: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func request() {
         statusText = "Getting GPS…"
-        manager.requestWhenInUseAuthorization()
-        manager.requestLocation()
+        retried = false
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            // Wait for locationManagerDidChangeAuthorization — requesting
+            // a fix now would fail before the user has answered.
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        default:
+            statusText = "Location not allowed — enable in Settings."
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        // The user just answered the permission prompt: only now is a
+        // location request valid.
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            if statusText == "Getting GPS…" {
+                manager.requestLocation()
+            }
+        case .denied, .restricted:
+            if statusText == "Getting GPS…" {
+                statusText = "Location not allowed — enable in Settings."
+            }
+        default:
+            break
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -33,6 +68,13 @@ final class SOSLocator: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // One retry on a transient failure (e.g. the first fix indoors
+        // timing out); a denial or a second failure is final.
+        if !retried, (error as? CLError)?.code != .denied {
+            retried = true
+            manager.requestLocation()
+            return
+        }
         statusText = "GPS unavailable."
     }
 }

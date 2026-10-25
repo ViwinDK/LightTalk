@@ -4,7 +4,7 @@ import Foundation
 ///  1. Camp / disaster coordination beacons (the headline use case)
 ///  2. Screen-less device diagnostics (the supporting use case)
 ///
-/// Codes are short on purpose — at 2.5 bits/sec, every character costs ~2.8 s
+/// Codes are short on purpose — at 5 bits/sec, every character costs ~1.4 s
 /// of airtime. The app expands them to full sentences deterministically
 /// (BeaconPresets.expansion), and the AI layer can translate them.
 struct BeaconPreset: Identifiable {
@@ -23,7 +23,7 @@ struct BeaconPreset: Identifiable {
 enum BeaconPresets {
 
     static let camp: [BeaconPreset] = [
-        // Codes are compact on purpose: at 2.8 s/character, every character
+        // Codes are compact on purpose: at 1.4 s/character, every character
         // costs hold-time. The phone expands them to full sentences.
         BeaconPreset(code: "WTR 1400", title: "Water distribution",
                      detail: "Water truck arrives at 2:00 PM. Bring containers.",
@@ -152,6 +152,10 @@ enum BeaconPresets {
         if let timed = waterExpansion(for: key, language: language) {
             return timed
         }
+        // "MED 5", "MED 12" — any location works, same as WTR's time.
+        if let med = medicalExpansion(for: key, language: language) {
+            return med
+        }
         guard let preset = all.first(where: { $0.code.uppercased() == key }) else { return nil }
         if language != "en", let t = translations[preset.code]?[language] {
             return t
@@ -190,6 +194,31 @@ enum BeaconPresets {
             return "تصل شاحنة المياه الساعة \(timeEN) \(period). أحضروا أوعية."
         default:
             return "Water truck arrives at \(timeEN). Bring containers."
+        }
+    }
+
+    /// "MED <n>" → "Medical tent has moved to location <n>."
+    /// in the requested language. The location number is variable — the
+    /// codebook doesn't need an entry for every possible location.
+    /// (MED 3's output here is identical to its preset entry, so
+    /// existing behavior is unchanged.)
+    private static func medicalExpansion(for key: String, language: String) -> String? {
+        guard key.hasPrefix("MED ") else { return nil }
+        let numPart = String(key.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+        guard !numPart.isEmpty, numPart.allSatisfy({ $0.isNumber }) else { return nil }
+        switch language {
+        case "es":
+            return "La carpa médica se ha trasladado al lugar \(numPart)."
+        case "fr":
+            return "La tente médicale a déménagé à l'emplacement \(numPart)."
+        case "hi":
+            return "चिकित्सा तंबू स्थान \(numPart) पर चला गया है।"
+        case "ta":
+            return "மருத்துவ கூடாரம் இடம் \(numPart)க்கு மாற்றப்பட்டுள்ளது।"
+        case "ar":
+            return "انتقلت الخيمة الطبية إلى الموقع \(numPart)."
+        default:
+            return "Medical tent has moved to location \(numPart)."
         }
     }
 }

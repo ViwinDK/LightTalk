@@ -1,5 +1,8 @@
 import SwiftUI
 import Combine
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 @main
 struct LightTalkApp: App {
@@ -23,11 +26,48 @@ struct LightTalkApp: App {
     }
 }
 
+// MARK: - On-device AI health check (lives here so GuideView has no cross-file dependency)
+
+enum AIModelHealth { case ready, notReady, unavailable }
+
+enum AIModelCheck {
+    /// Pings Apple's on-device model with a trivial prompt. Calls back on the
+    /// main thread with .ready, .notReady (no answer in 6 s) or .unavailable.
+    static func run(completion: @escaping (AIModelHealth) -> Void) {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *), SystemLanguageModel.default.isAvailable {
+            var done = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                if !done { done = true; completion(.notReady) }
+            }
+            Task {
+                do {
+                    let session = LanguageModelSession()
+                    let r = try await session.respond(to: "Reply with exactly: OK")
+                    let ok = r.content.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().contains("OK")
+                    await MainActor.run {
+                        if !done { done = true; completion(ok ? .ready : .notReady) }
+                    }
+                } catch {
+                    await MainActor.run {
+                        if !done { done = true; completion(.notReady) }
+                    }
+                }
+            }
+            return
+        }
+        #endif
+        completion(.unavailable)
+    }
+}
+
 /// The beacon library: what each camp / device code means, and its airtime.
 /// Plus the user's own custom codes — a camp's private language.
 struct BeaconsView: View {
     @ObservedObject private var customStore = CustomCodeStore.shared
     @State private var showingAddCode = false
+    @State private var editingCustom: CustomCode?
+    @State private var editingPreset: BeaconPreset?
     @State private var newCode = ""
     @State private var newMeaning = ""
     // ✨ AI: describe the code you want, get a suggestion.
@@ -52,6 +92,8 @@ struct BeaconsView: View {
                                     .foregroundColor(.secondary)
                             }
                             .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                            .onTapGesture { editingCustom = entry }
                         }
                         .onDelete { customStore.delete(at: $0) }
                     }
@@ -59,11 +101,15 @@ struct BeaconsView: View {
                 Section("Camp coordination") {
                     ForEach(BeaconPresets.camp) { preset in
                         presetRow(preset)
+                            .contentShape(Rectangle())
+                            .onTapGesture { editingPreset = preset }
                     }
                 }
                 Section("Device diagnostics") {
                     ForEach(BeaconPresets.device) { preset in
                         presetRow(preset)
+                            .contentShape(Rectangle())
+                            .onTapGesture { editingPreset = preset }
                     }
                 }
                 Section {
@@ -73,6 +119,17 @@ struct BeaconsView: View {
                 }
             }
             .navigationTitle("Beacon codes")
+            .sheet(item: $editingCustom) { entry in
+                EditCodeSheet(originalCode: entry.code, code: entry.code, meaning: entry.meaning, isPreset: false)
+            }
+            .sheet(item: $editingPreset) { preset in
+                EditCodeSheet(originalCode: preset.code, code: preset.code,
+                              // Pre-fill with the exact override text if one exists —
+                              // not the decoded expansion, so a wildcard template
+                              // ("Water truck at *") is never flattened into fixed text.
+                              meaning: customStore.codes.first { $0.code.uppercased() == preset.code.uppercased() }?.meaning ?? preset.detail,
+                              isPreset: true)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -199,17 +256,114 @@ struct BeaconsView: View {
     }
 
     private func presetRow(_ preset: BeaconPreset) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // Effective meaning: a custom override (exact code match) wins over
+        // the built-in text, exactly as it does when decoding.
+        let effective = customStore.expansion(for: preset.code)
+        let shownMeaning = effective ?? preset.detail
+        return VStack(alignment: .leading, spacing: 4) {
             Text(preset.code)
                 .font(.system(.headline, design: .monospaced))
-            Text(preset.detail)
+            Text(shownMeaning)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+            if effective != nil && effective != preset.detail {
+                Text("Edited — your version replaces the built-in meaning")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
             Text("Airtime: \(String(format: "%.0f", BlinkProtocol.airtime(for: preset.code))) s")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// Edit an existing code. For a custom code, Save updates it in place
+/// (renaming replaces the old entry) and Delete removes it. For a built-in
+/// preset, Save stores a custom override with the same code — custom codes
+/// are checked before presets when decoding, so the override wins, and the
+/// preset itself is never changed. Restoring deletes the override and the
+/// original preset meaning returns. If the code itself is renamed on a preset,
+/// it becomes a separate custom code and the preset is untouched.
+struct EditCodeSheet: View {
+    @ObservedObject private var customStore = CustomCodeStore.shared
+    @Environment(\.dismiss) private var dismiss
+    let originalCode: String
+    let isPreset: Bool
+    @State private var code: String
+    @State private var meaning: String
+
+    init(originalCode: String, code: String, meaning: String, isPreset: Bool) {
+        self.originalCode = originalCode
+        self.isPreset = isPreset
+        _code = State(initialValue: code)
+        _meaning = State(initialValue: meaning)
+    }
+
+    /// True when a custom override already shadows this preset.
+    private var hasOverride: Bool {
+        isPreset && customStore.codes.contains { $0.code.uppercased() == originalCode.uppercased() }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Code") {
+                    TextField("e.g. WTR2 1500", text: $code)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                }
+                Section("Meaning") {
+                    TextField("e.g. Second water truck at 3 PM", text: $meaning)
+                }
+                if isPreset {
+                    Section {
+                        Text("Saving keeps the built-in preset intact and stores your version as a custom code — it takes precedence when decoding. If you change the code itself, it becomes a separate custom code instead.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    if hasOverride {
+                        Section {
+                            Button(role: .destructive) {
+                                customStore.delete(code: originalCode)
+                                dismiss()
+                            } label: {
+                                Text("Restore original meaning")
+                            }
+                        }
+                    }
+                } else {
+                    Section {
+                        Button(role: .destructive) {
+                            customStore.delete(code: originalCode)
+                            dismiss()
+                        } label: {
+                            Text("Delete code")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(isPreset ? "Edit preset" : "Edit code")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if isPreset {
+                            customStore.add(code: code, meaning: meaning)
+                        } else {
+                            customStore.update(oldCode: originalCode, code: code, meaning: meaning)
+                        }
+                        dismiss()
+                    }
+                    .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty ||
+                              meaning.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
     }
 }
 
@@ -226,7 +380,7 @@ struct GuideView: View {
                         Text("1. The beacon blinks text as light, 5 bits per second.\n2. Point the phone at it — auto-aim finds the strongest blink by itself. Tap to aim at one specific beacon (others are ignored); 🎯 Re-aim returns to auto-aim.\n3. The app locks the camera exposure, subtracts the background light (differential measurement — that's the daylight trick), and calibrates to the room's light using the preamble.\n4. Bits become letters, live, with parity checking on every character. Tap 🔊 to hear the message spoken.")
                     }
                     group(title: "The other tabs") {
-                        Text("SCANNER: point at any blinking light — no protocol needed — and read its flicker frequency. 2.5 Hz steady blink? Might be a beacon. 60/120 Hz? Mains flicker from an ordinary bulb. It also lists every beacon in view (census); tap Decode →, then read it in the Decode tab.\nBEACON: this phone becomes the transmitter — presets, your own typed message, dictate-by-voice, or 🆘 SOS which flashes your GPS coordinates as light.\nCODES: the beacon library, plus your own custom codes — a camp's private language, learned by the phone.\nHISTORY: every message ever decoded, with AI summaries.")
+                        Text("BEACON: this phone becomes the transmitter — presets, your own typed message, or 🆘 SOS which flashes your GPS coordinates as light.\nCODES: the beacon library, plus your own custom codes — a camp's private language, learned by the phone.\nHISTORY: every message ever decoded, with AI summaries.\nLEARN: a pipeline visualizer shows light pulses becoming bits becoming words.")
                     }
                     group(title: "Why not a QR code?") {
                         Text("QR codes win when you have a screen and a fixed message. This is for the opposite case: a ten-cent LED on a device with no screen and no radio. A QR is a photograph of data; this is a live broadcast — the beacon streams changing messages and sips power doing it.")
@@ -258,7 +412,7 @@ struct GuideView: View {
                             Button(aiChecking ? "Checking…" : "Check on-device AI") {
                                 aiChecking = true
                                 aiStatus = nil
-                                MessageIntelligence.checkModelHealth { health in
+                                AIModelCheck.run { health in
                                     aiChecking = false
                                     switch health {
                                     case .ready:
